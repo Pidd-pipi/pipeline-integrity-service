@@ -13,6 +13,22 @@ var (
 	ErrOpsPolicy     = errors.New("operations policy rejected the request")
 )
 
+// OpsCode* are the stable, client-facing error codes mapped from the sentinel
+// errors above. They are returned by opsCode and serialized over the wire so
+// callers can branch on a stable string instead of parsing prose.
+const (
+	OpsCodeNotFound   = "not_found"
+	OpsCodeConflict   = "conflict"
+	OpsCodeInvalid    = "invalid"
+	OpsCodeTransition = "transition"
+	OpsCodePolicy     = "policy"
+	OpsCodeInternal   = "internal"
+)
+
+// OpsError carries the operation context alongside a sentinel cause. It
+// preserves the cause chain so errors.Is / errors.As keep working after
+// wrapping — the previous implementation returned nil from Unwrap, which
+// severed the chain and made every classified error read as "internal".
 type OpsError struct {
 	Code      string
 	Operation string
@@ -23,19 +39,55 @@ func (e *OpsError) Error() string {
 	if e.Cause == nil {
 		return e.Code + ": " + e.Operation
 	}
-	return fmt.Sprintf("%s: %s: %v", e.Code, e.Operation, e.Cause)
+	return fmt.Sprintf("%s: %s: %s", e.Code, e.Operation, e.Cause)
 }
-func (e *OpsError) Unwrap() error { return nil }
+
+// Unwrap exposes Cause so errors.Is reaches the underlying sentinel error.
+func (e *OpsError) Unwrap() error { return e.Cause }
+
+// wrapOps annotates an error with the operation that produced it while keeping
+// the sentinel cause reachable via errors.Is (note the %w verb, not %v).
 func wrapOps(code, operation string, cause error) error {
-	return fmt.Errorf("%s: %s: %v", code, operation, cause)
+	if cause == nil {
+		return nil
+	}
+	return &OpsError{Code: code, Operation: operation, Cause: cause}
 }
+
+// opsCode returns the stable client-facing code for an error. It walks the
+// chain (including OpsError.Cause) so wrapped sentinels classify correctly
+// instead of collapsing to "internal".
 func opsCode(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrOpsNotFound):
+		return OpsCodeNotFound
+	case errors.Is(err, ErrOpsConflict):
+		return OpsCodeConflict
+	case errors.Is(err, ErrOpsInvalid):
+		return OpsCodeInvalid
+	case errors.Is(err, ErrOpsTransition):
+		return OpsCodeTransition
+	case errors.Is(err, ErrOpsPolicy):
+		return OpsCodePolicy
+	}
+	if code := opsCodeFromTyped(err); code != "" {
+		return code
+	}
+	return OpsCodeInternal
+}
+
+// opsCodeFromTyped honors an explicit Code set on an *OpsError that is not
+// backed by one of the known sentinels (e.g. a domain-specific code).
+func opsCodeFromTyped(err error) string {
 	var typed *OpsError
-	if errors.As(err, &typed) {
+	if errors.As(err, &typed) && typed.Code != "" {
 		return typed.Code
 	}
-	return "internal"
+	return ""
 }
+
 func opsIsNotFound(err error) bool   { return errors.Is(err, ErrOpsNotFound) }
 func opsIsConflict(err error) bool   { return errors.Is(err, ErrOpsConflict) }
 func opsIsInvalid(err error) bool    { return errors.Is(err, ErrOpsInvalid) }
