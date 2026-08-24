@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -17,13 +16,13 @@ func newRouter(store *CycleStore) http.Handler {
 			writeJSON(w, 405, map[string]string{"error": "method not allowed"})
 			return
 		}
-		ctx, cancel := opsContext(context.Background(), 3*time.Second)
+		ctx, cancel := opsContext(r.Context(), 3*time.Second)
 		defer cancel()
 		if err := opsDelay(ctx, 10*time.Millisecond); err != nil {
 			writeJSON(w, 499, map[string]string{"error": "request canceled"})
 			return
 		}
-		writeJSON(w, 200, store.list())
+		writeJSON(w, 200, store.list(ctx))
 	})
 	m.HandleFunc("/api/cycles/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -45,15 +44,19 @@ func newRouter(store *CycleStore) http.Handler {
 			writeJSON(w, 400, map[string]string{"error": "valid status is required"})
 			return
 		}
-		ctx, cancel := opsContext(context.Background(), 3*time.Second)
+		ctx, cancel := opsContext(r.Context(), 3*time.Second)
 		defer cancel()
 		if err := opsDelay(ctx, 20*time.Millisecond); err != nil {
 			writeJSON(w, 499, map[string]string{"error": "request canceled"})
 			return
 		}
-		v, e := store.changeStatus(id, c.Status)
+		v, e := store.changeStatus(ctx, id, c.Status)
 		if errors.Is(e, errCycleNotFound) {
 			writeJSON(w, 404, map[string]string{"error": e.Error()})
+			return
+		}
+		if e != nil {
+			writeJSON(w, 499, map[string]string{"error": "request canceled"})
 			return
 		}
 		writeJSON(w, 200, v)
