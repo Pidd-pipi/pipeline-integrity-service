@@ -5,7 +5,10 @@ import (
 	"sync"
 )
 
-var errCycleNotFound = errors.New("integrity cycle not found")
+var (
+	errCycleNotFound           = errors.New("integrity cycle not found")
+	errCycleInvalidTransition  = errors.New("integrity cycle status transition is not allowed")
+)
 
 type CycleStore struct {
 	mu    sync.RWMutex
@@ -30,6 +33,9 @@ func (s *CycleStore) changeStatus(id, status string) (IntegrityCycle, error) {
 	v, ok := s.items[id]
 	if !ok {
 		return IntegrityCycle{}, errCycleNotFound
+	}
+	if err := validateCycleTransition(v.Status, status); err != nil {
+		return IntegrityCycle{}, errCycleInvalidTransition
 	}
 	v.Status = status
 	s.items[id] = v

@@ -38,8 +38,15 @@ func newRouter(store *CycleStore) http.Handler {
 			return
 		}
 		v, e := store.changeStatus(id, c.Status)
-		if errors.Is(e, errCycleNotFound) {
+		switch {
+		case errors.Is(e, errCycleNotFound):
 			writeJSON(w, 404, map[string]string{"error": e.Error()})
+			return
+		case errors.Is(e, errCycleInvalidTransition):
+			writeJSON(w, 400, map[string]string{"error": e.Error()})
+			return
+		case e != nil:
+			writeJSON(w, 500, map[string]string{"error": e.Error()})
 			return
 		}
 		writeJSON(w, 200, v)
